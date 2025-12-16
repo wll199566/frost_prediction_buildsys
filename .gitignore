@@ -1,0 +1,9 @@
+*.pkl
+*.log
+*.pt
+*.csv
+processed_data/
+**/__pycache__/
+models/**/results/
+Data/
+results/
