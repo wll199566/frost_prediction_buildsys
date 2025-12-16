@@ -1,6 +1,6 @@
-# ❄️ F3 Frost Risk Forecasting Challenge (Team  PANPANPAN)
+# ❄️ Frost Risk Forecasting
 
-Welcome to the repository for Team PANPANPAN's submission to the F3 Frost Risk Forecasting Data Challenge hosted by the F3 Innovate and the National Data Platform. Our aim was to build a machine learning pipeline for forecasting frost (i.e., air temperature < 0°C) within next 3, 6, 12, 24 hours, using only information available up to the forecast time.
+Our aim in this project is to build a machine learning pipeline for forecasting frost (i.e., air temperature < 0°C) within next 3, 6, 12, 24 hours, using only information available up to the forecast time.
 
 We include the code used in our experiments in this repository and show the steps to run them to get the results in this `README.md` file.
 
@@ -70,23 +70,6 @@ bash run_eval_intext.sh
 4. Normalize each variable based on (mean, std) if their values are unbounded (e.g., air temperature, soil temperature, dew point, etc.) or (min, max) if their values are bounded (e.g., relative humidity (0~100%), wind direction (0-359)). 
 5. Fill the missing values by linear interpolation.
 
-# Modeling Strategy
-**Baseline:** Mean Filling (fill the mean air temperature value in the context window).
-
-**Our model:** Transformer-MLP (use Transformer as the encoder to encode the information in the context window, i.e., historical data, then use a two-layer MLP to decode and predict the air temperature in the next several hours).
-
-# Data Challenge Report
-Please refer to this [pdf file](./Data_Challenge_Report.pdf) for our report.
-
-# Acknowledgments
-This project was developed for the Frost Forecasting Data Challenge hosted by the F3 Innovate (F3i) and the National Data Platform (NDP).
-
-Special thanks to **Mr. Ryan Dinubilo** for organizing this challenge and his helpful responses to our questions, and **Dr. Shijia Pan** for her invaluable supports to our team. Your support made a huge difference in helping our team resolve doubts and stay on track!
-
-
-# Team PANPANPAN
-* Hui Wei
-* Dong Yoon Lee
 
 # Contact
 For questions, suggestions, or collaborations, feel free to open an issue or reach out via email **huiwei2@ucmerced.edu**.
