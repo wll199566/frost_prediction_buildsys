@@ -7,7 +7,7 @@ from utils.others import new_dir
 file_path = './download/api_key.txt'
 
 with open(file_path, 'r') as file:
-    api_key = file.read()
+    api_key = file.read().strip()
 
 url = f"http://et.water.ca.gov/api/station"
 response = requests.get(url)

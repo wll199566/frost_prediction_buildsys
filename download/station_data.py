@@ -1,6 +1,7 @@
 """
 Download all station data for central valley from CIMIS. 
 """
+import os
 import pandas as pd
 import requests
 import json
@@ -11,10 +12,11 @@ from datetime import datetime, timedelta
 # Your CIMIS API key (you can get one for free after registration)
 file_path = './download/api_key.txt'
 with open(file_path, 'r') as file:
-    API_KEY = file.read()
+    API_KEY = file.read().strip()
 
-# File name for the station information (Updated to use the filtered file if desired)
-STATIONS_INFO_FILE = "all_stations_info.csv"  # Use your filtered file name here if you made one!
+# File name for the station information
+PATH = "./Data"
+STATIONS_INFO_FILE = "cv_stations_info.csv"
 
 # Date Range for the query (MM/DD/YYYY)
 START_DATE_STR = "09/28/2010"
@@ -42,114 +44,129 @@ BASE_URL = "http://et.water.ca.gov/api/data"
 CHUNK_DAYS = 60
 # --- End Configuration ---
 
-def parse_cimis_datetime(date_str, time_str):
-    """
-    Parses CIMIS Date (YYYY-MM-DD) and Hour (HH00) into a continuous datetime object.
-    
-    Handles the special case where CIMIS uses '2400' to denote midnight (00:00) 
-    of the *next* day.
-    """
-    try:
-        base_date = datetime.strptime(date_str, "%Y-%m-%d")
-        hour_val = int(time_str[:2])
-        
-        if hour_val == 24:
-            # Case 1: '2400' means 00:00 of the next day.
-            timestamp = base_date + timedelta(days=1)
-        else:
-            # Case 2: '0100' through '2300' are standard hours on the base date.
-            datetime_str = f"{date_str} {time_str[:-2]}:{time_str[-2:]}:00"
-            timestamp = datetime.strptime(datetime_str, "%Y-%m-%d %H:%M:%S")
-            
-        return timestamp
-    except ValueError as e:
-        print(f"Datetime parsing error for Date: {date_str}, Hour: {time_str}. Error: {e}")
-        return None
-
 def fetch_cimis_data(station_id, start_date, end_date):
-    """Fetches hourly CIMIS data for a single station within a date range."""
+    """
+    Fetches hourly CIMIS data and QC codes for a single station, 
+    keeping the original CIMIS Date and Hour strings.
+    """
     
-    # Format dates as YYYY-MM-DD for the API
     start_date_fmt = start_date.strftime("%Y-%m-%d")
     end_date_fmt = end_date.strftime("%Y-%m-%d")
 
-    # Construct the API request URL
-    url = f"{BASE_URL}?appKey={API_KEY}&targets={station_id}&startDate={start_date_fmt}&endDate={end_date_fmt}&dataItems={DATA_ITEMS_STR}"
-    
+    url = f"{BASE_URL}?appKey={API_KEY.strip()}&targets={station_id}&startDate={start_date_fmt}&endDate={end_date_fmt}&dataItems={DATA_ITEMS_STR}&unitOfMeasure=M"
+    print(f"station id: {station_id}, start_date: {start_date}, end_date: {end_date}")
     try:
         response = requests.get(url, headers={'Accept': 'application/json'})
-        response.raise_for_status()  # Raise an exception for bad status codes (4xx or 5xx)
+        response.raise_for_status() 
         data = response.json()
-        
+ 
         if 'Data' in data and 'Providers' in data['Data'] and data['Data']['Providers'][0]['Records']:
             records = data['Data']['Providers'][0]['Records']
             df_records = []
             
             for record in records:
-                timestamp = parse_cimis_datetime(record['Date'], record['Hour'])
-                if timestamp is None:
-                    continue # Skip this record if time parsing failed
-
                 row = {
-                    'Datetime': timestamp,
-                    'StationId': record['Station'],
+                    'Date': record.get('Date'),
+                    'Hour': record.get('Hour'),
+                    'StationId': record.get('Station'),
                 }
                 
-                # Extract the value for each requested data item
+                # Extract the Value and QC code for each requested data item
                 for item in DATA_ITEMS:
                     # Convert item code to JSON key (e.g., 'hly-asce-eto' -> 'HlyAsceEto')
                     json_key = "".join(x.capitalize() for x in item.split('-'))
                     
                     if json_key in record:
-                        value = record[json_key].get('Value')
+                        data_field = record[json_key]
                         
-                        # Use np.nan for missing/invalid data, as requested
+                        # --- 1. Extract Value (Value column name: item) ---
+                        value = data_field.get('Value')
+                        # Check for missing/invalid data strings and convert to np.nan
                         if value and value.strip() not in ['M', '---', '####']:
                             try:
                                 row[item] = float(value)
                             except ValueError:
-                                row[item] = np.nan # Use np.nan if conversion fails
+                                row[item] = np.nan
                         else:
-                            row[item] = np.nan # Use np.nan for explicit missing values
+                            row[item] = np.nan
+                            
+                        # --- 2. Extract QC (QC column name: item + '-qc') ---
+                        qc_value = data_field.get('Qc')
+                        if qc_value is not None:
+                            # QC codes are typically single-character strings or digits
+                            row[item + '-qc'] = qc_value.strip()
+                        else:
+                            row[item + '-qc'] = "" # Use empty string for consistency if QC is missing
                     else:
-                        row[item] = np.nan # Use np.nan if item is missing in the record
+                        # If the entire data item is missing from the record
+                        row[item] = np.nan
+                        row[item + '-qc'] = ""
 
                 df_records.append(row)
             
-            # Sort by Datetime to ensure correct chronological order after '2400' handling
-            df_temp = pd.DataFrame(df_records)
-            df_final = df_temp.set_index('Datetime').sort_index()
-            return df_final
+            return pd.DataFrame(df_records)
         else:
-            print(f"-> No data records found for station {station_id} between {start_date_fmt} and {end_date_fmt}.")
+            # print(f"-> No data records found for station {station_id} in chunk {start_date_fmt} to {end_date_fmt}.")
             return pd.DataFrame()
 
     except requests.exceptions.HTTPError as errh:
-        print(f"-> HTTP Error for station {station_id}: {errh}")
+        print(f"-> HTTP Error for station {station_id} in chunk {start_date_fmt} to {end_date_fmt}: {errh}")
     except requests.exceptions.RequestException as err:
-        print(f"-> Request Error for station {station_id}: {err}")
+        print(f"-> Request Error for station {station_id} in chunk {start_date_fmt} to {end_date_fmt}: {err}")
     except json.JSONDecodeError:
         print(f"-> Failed to decode JSON for station {station_id}. Response: {response.text[:100]}...")
     except Exception as e:
-        print(f"-> An unexpected error occurred for station {station_id}: {e}")
+        print(f"-> An unexpected error occurred for station {station_id} in chunk {start_date_fmt} to {end_date_fmt}: {e}")
         
     return pd.DataFrame()
+
+def post_process(df_stations):
+    # Remove some columns
+    df_stations = df_stations.drop(columns=["Latitude", "Longitude"])
+    # Rename the columns
+    name2name = {"hly-asce-eto": "ETo (mm)",  
+                 "hly-precip": "Precip (mm)",    
+                 "hly-sol-rad": "Sol Rad (W/sq.m)",   
+                 "hly-vap-pres": "Vap Pres (kPa)",  
+                 "hly-air-tmp": "Air Temp (C)",   
+                 "hly-rel-hum": "Rel Hum (%)",   
+                 "hly-dew-pnt": "Dew Point (C)",   
+                 "hly-wind-spd": "Wind Speed (m/s)",  
+                 "hly-wind-dir": "Wind Dir (0-360)",  
+                 "hly-soil-tmp": "Soil Temp (C)",
+                 "hly-asce-eto-qc": "eto-qc",  
+                 "hly-precip-qc": "precip-qc",    
+                 "hly-sol-rad-qc": "solrad-qc",   
+                 "hly-vap-pres-qc": "vappres-qc",  
+                 "hly-air-tmp-qc": "airtmp-qc",   
+                 "hly-rel-hum-qc": "relhum-qc",   
+                 "hly-dew-pnt-qc": "dewpnt-qc",   
+                 "hly-wind-spd-qc": "windspd-qc",  
+                 "hly-wind-dir-qc": "winddir-qc",  
+                 "hly-soil-tmp-qc": "soiltmp-qc",
+                 "StationId": "Stn Id"   
+                 }
+    df_stations = df_stations.rename(columns=name2name)
+    return df_stations
 
 def main():
     if API_KEY == "YOUR-CIMIS-API-KEY":
         print("\n!!! ERROR: Please replace 'YOUR-CIMIS-API-KEY' in the script with your actual CIMIS API key. !!!\n")
         return
 
-    print(f"--- CIMIS Data Download Script (Revised) ---")
+    print(f"--- CIMIS Data Download Script (Per Station with QC Codes) ---")
     print(f"Date Range: {START_DATE_STR} to {END_DATE_STR}")
-    print(f"Missing data will be represented by 'np.nan'.")
+    print("Files will be saved in a new folder named 'cimis_hourly_data'.")
     
     # 1. Read station IDs
     try:
-        # Load the station info CSV
-        stations_df = pd.read_csv(STATIONS_INFO_FILE)
-        # Convert Stn Id to integer and filter for valid IDs
-        station_ids = stations_df['Stn Id'].dropna().astype(int).unique().tolist()
+        stations_df = pd.read_csv(os.path.join(PATH, STATIONS_INFO_FILE))
+        # Convert Stn Id to integer and filter for valid IDs, and get station names for naming files
+        stations_info = stations_df[['Stn Id', 'Stn Name', 'Latitude', 'Longitude']].dropna(subset=['Stn Id'])
+        stations_info['Stn Id'] = stations_info['Stn Id'].astype(int)
+        
+        station_ids = stations_info['Stn Id'].tolist()
+        
         print(f"Found {len(station_ids)} station IDs to process from {STATIONS_INFO_FILE}.")
         
     except FileNotFoundError:
@@ -167,59 +184,75 @@ def main():
         print("\n!!! ERROR: Date format is incorrect. Please use MM/DD/YYYY. !!!\n")
         return
 
-    all_data = []
+    # Create output directory
+    output_dir = "cimis_hourly_data"
+    os.makedirs(os.path.join(PATH, output_dir), exist_ok=True)
+    
+    successful_downloads = 0
 
     # 2. Loop through all stations and date chunks
     for station_id in station_ids:
-        print(f"\nProcessing Station ID: {station_id}...")
         station_data = []
         current_start = start_date
         
+        # Get station name for file naming
+        station_name = stations_info[stations_info['Stn Id'] == station_id]['Stn Name'].iloc[0]
+        # Clean the name for use in a filename
+        safe_name = "".join([c for c in station_name if c.isalpha() or c.isdigit() or c==' ']).rstrip().replace(' ', '_')
+        output_filename = os.path.join(PATH, output_dir, f"{station_id}-{safe_name}.csv")
+
+        print(f"\nProcessing Station ID {station_id} ({station_name})...")
+        
+        # --- 2.1. Loop through the date range in chunks ---
         while current_start <= end_date:
             current_end = current_start + timedelta(days=CHUNK_DAYS - 1)
             if current_end > end_date:
                 current_end = end_date
-
-            # print(f"  Fetching data chunk: {current_start} to {current_end}")
             
             df_chunk = fetch_cimis_data(station_id, current_start, current_end)
             if not df_chunk.empty:
                 station_data.append(df_chunk)
             
-            # Move to the next chunk
             current_start = current_end + timedelta(days=1)
-        
-        # Aggregate all chunks for the current station
+
+        # --- 2.2. Aggregate and save data for the current station ---
         if station_data:
-            df_station = pd.concat(station_data)
-            all_data.append(df_station)
-            print(f"  Successfully retrieved {len(df_station)} hourly records for station {station_id}.")
+            df_station = pd.concat(station_data).reset_index(drop=True)
+            
+            # Merge station metadata
+            df_station = df_station.merge(
+                stations_info[['Stn Id', 'Stn Name', 'Latitude', 'Longitude']],
+                left_on=df_station['StationId'].astype(int), 
+                right_on='Stn Id',
+                how='left'
+            ).drop(columns=['Stn Id'])
+            
+            # Sort by Date and Hour string
+            df_station = df_station.sort_values(by=['Date', 'Hour']).reset_index(drop=True)
+
+            # Reorder columns to match the requested format (metadata first, then alternating data/qc)
+            base_cols = ['Date', 'Hour', 'StationId', 'Stn Name', 'Latitude', 'Longitude']
+            data_qc_cols = []
+            for item in DATA_ITEMS:
+                data_qc_cols.append(item)
+                data_qc_cols.append(item + '-qc')
+            
+            final_cols = base_cols + data_qc_cols
+            df_station = df_station[final_cols]
+            
+            # Post process
+            df_station = post_process(df_station)
+            
+            # Save the file
+            df_station.to_csv(output_filename, index=False)
+            print(f"  Saved {len(df_station)} hourly records to: {output_filename}")
+            successful_downloads += 1
         else:
-            print(f"  No data retrieved for station {station_id} over the entire period.")
+            print(f"  No data retrieved for station {station_id}.")
 
 
-    # 3. Aggregate all station data
-    if all_data:
-        final_df = pd.concat(all_data)
-        
-        # Merge with station info to include Lat/Lon/Name
-        # Note: 'Stn Id' is integer in stations_df, 'StationId' is string in final_df records
-        final_df = final_df.reset_index().merge(
-            stations_df[['Stn Id', 'Stn Name', 'Latitude', 'Longitude']],
-            left_on=final_df['StationId'].astype(int), # Convert back to int for merging
-            right_on='Stn Id',
-            how='left'
-        ).drop(columns=['Stn Id', 'key_0']).set_index('Datetime')
-        
-        # 4. Save the final dataset
-        output_filename = "cimis_hourly_data_2010_2025_revised.csv"
-        final_df.to_csv(output_filename)
-        print(f"\n--- SUCCESS ---")
-        print(f"All data has been successfully combined and saved to: {output_filename}")
-        print(f"Total records saved: {len(final_df)}")
-    else:
-        print("\n--- COMPLETE ---")
-        print("No data was retrieved from the CIMIS API. Please check your configuration.")
+    print(f"\n--- SUCCESS ---")
+    print(f"Completed processing. Successfully downloaded data for {successful_downloads} stations.")
 
 if __name__ == "__main__":
     main()
