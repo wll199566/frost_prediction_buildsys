@@ -55,7 +55,8 @@ def process_dataframe(filenames):
                                'qc.3':'vappres-qc', 'qc.4':'airtmp-qc', 'qc.5':'relhum-qc',
                                'qc.6':'dewpnt-qc', 'qc.7':'windspd-qc', 'qc.8':'winddir-qc',
                                'qc.9':'soiltmp-qc'})
-        
+            df['Date'] = pd.to_datetime(df['Date'], format='%m/%d/%Y').dt.strftime('%Y-%m-%d')
+
         reorder_names = ['Stn Id', 'Stn Name', 'Date', 'Hour (PST)', 'ETo (mm)', 'eto-qc',
                         'Precip (mm)', 'precip-qc', 'Sol Rad (W/sq.m)', 'solrad-qc',
                         'Vap Pres (kPa)', 'vappres-qc', 'Air Temp (C)', 'airtmp-qc',
