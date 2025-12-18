@@ -26,7 +26,7 @@ def filter_central_valley_stations(csv_info):
         df = pd.read_csv(csv_info)
         
         # Filter the DataFrame based on the list of Central Valley counties
-        central_valley_df = df[df['County'].isin(CENTRAL_VALLEY_COUNTIES)].copy()
+        central_valley_df = df[(df['County'].isin(CENTRAL_VALLEY_COUNTIES)) | (df["Stn Id"]==47)].copy()
         central_valley_df = central_valley_df[central_valley_df['Active']==True]
         
         return central_valley_df

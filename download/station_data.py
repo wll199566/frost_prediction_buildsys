@@ -199,7 +199,7 @@ def main():
         station_name = stations_info[stations_info['Stn Id'] == station_id]['Stn Name'].iloc[0]
         # Clean the name for use in a filename
         safe_name = "".join([c for c in station_name if c.isalpha() or c.isdigit() or c==' ']).rstrip().replace(' ', '_')
-        output_filename = os.path.join(PATH, output_dir, f"{station_id}-{safe_name}.csv")
+        output_filename = os.path.join(PATH, output_dir, f"{station_id}-{safe_name.replace("_", "").lower()}.csv")
 
         print(f"\nProcessing Station ID {station_id} ({station_name})...")
         
